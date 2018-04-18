@@ -50,6 +50,9 @@ const randomSecretSize = 32
 // defaultCheckInterval is the default time in between health checks
 const defaultCheckInterval = 10 * time.Second
 
+// defaultStorageTTL is the default storage expiration time
+const defaultStorageTTL = 7 * 24 * time.Hour
+
 // App is a global registry application object. Shared resources can be placed
 // on this object that will be accessible from all requests. Any writable
 // fields should be protected.
@@ -63,27 +66,27 @@ type App struct {
 	registry         distribution.Namespace      // registry is the primary registry backend for the app instance.
 	accessController auth.AccessController       // main access controller for application
 
-	// httpHost is a parsed representation of the http.host parameter from
-	// the configuration. Only the Scheme and Host fields are used.
+                                                 // httpHost is a parsed representation of the http.host parameter from
+                                                 // the configuration. Only the Scheme and Host fields are used.
 	httpHost url.URL
 
-	// events contains notification related configuration.
+                                                 // events contains notification related configuration.
 	events struct {
-		sink   notifications.Sink
-		source notifications.SourceRecord
-	}
+		       sink   notifications.Sink
+		       source notifications.SourceRecord
+	       }
 
 	redis *redis.Pool
 
-	// trustKey is a deprecated key used to sign manifests converted to
-	// schema1 for backward compatibility. It should not be used for any
-	// other purposes.
+                                                 // trustKey is a deprecated key used to sign manifests converted to
+                                                 // schema1 for backward compatibility. It should not be used for any
+                                                 // other purposes.
 	trustKey libtrust.PrivateKey
 
-	// isCache is true if this registry is configured as a pull through cache
+                                                 // isCache is true if this registry is configured as a pull through cache
 	isCache bool
 
-	// readOnly is true if the registry is in a read-only maintenance mode
+                                                 // readOnly is true if the registry is in a read-only maintenance mode
 	readOnly bool
 }
 
@@ -189,11 +192,23 @@ func NewApp(ctx context.Context, config *configuration.Configuration) *App {
 	}
 
 	// configure deletion
+	var storageTTL time.Duration = defaultStorageTTL;
 	if d, ok := config.Storage["delete"]; ok {
 		e, ok := d["enabled"]
 		if ok {
 			if deleteEnabled, ok := e.(bool); ok && deleteEnabled {
 				options = append(options, storage.EnableDelete)
+				// only when delete is enabled do we care about ttl setting
+				t, ok:= d["ttl"]
+				if ok {
+					parsedDuration, err := time.ParseDuration(t.(string))
+					if err != nil {
+						dcontext.GetLogger(app).Warn(fmt.Sprintf("Cannot parse duration: %s, using default value: %s", err.Error(), defaultStorageTTL))
+					} else{
+						storageTTL = parsedDuration
+						dcontext.GetLogger(app).Info(fmt.Sprintf("Storage ttl set to: %s", storageTTL))
+					}
+				}
 			}
 		}
 	}
@@ -313,7 +328,7 @@ func NewApp(ctx context.Context, config *configuration.Configuration) *App {
 
 	// configure as a pull through cache
 	if config.Proxy.RemoteURL != "" {
-		app.registry, err = proxy.NewRegistryPullThroughCache(ctx, app.registry, app.driver, config.Proxy)
+		app.registry, err = proxy.NewRegistryPullThroughCache(ctx, app.registry, app.driver, config.Proxy, storageTTL)
 		if err != nil {
 			panic(err.Error())
 		}
